@@ -49,21 +49,25 @@ func (s *Server) handleTask(w http.ResponseWriter, r *http.Request) {
 		// Реализация удаления задачи по id
 		idParam := r.URL.Query().Get("id")
 		if idParam == "" {
+			w.WriteHeader(http.StatusBadRequest)
 			json.NewEncoder(w).Encode(map[string]string{"error": "Не указан идентификатор"})
 			return
 		}
 		id, err := strconv.Atoi(idParam)
 		if err != nil {
+			w.WriteHeader(http.StatusBadRequest)
 			json.NewEncoder(w).Encode(map[string]string{"error": "Неверный формат идентификатора"})
 			return
 		}
 		res, err := s.db.Exec(`DELETE FROM scheduler WHERE id = ?`, id)
 		if err != nil {
+			w.WriteHeader(http.StatusInternalServerError)
 			json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
 			return
 		}
 		rowsAffected, err := res.RowsAffected()
 		if err != nil || rowsAffected == 0 {
+			w.WriteHeader(http.StatusNotFound)
 			json.NewEncoder(w).Encode(map[string]string{"error": "Задача не найдена"})
 			return
 		}
@@ -78,14 +82,16 @@ func (s *Server) handleTask(w http.ResponseWriter, r *http.Request) {
 // Возвращает JSON-объект со всеми полями задачи или ошибку, если задача не найдена
 func (s *Server) getTaskByIDHandler(w http.ResponseWriter, r *http.Request) {
 	idParam := r.URL.Query().Get("id")
+	w.Header().Set("Content-Type", "application/json; charset=UTF-8")
 	if idParam == "" {
-		w.Header().Set("Content-Type", "application/json; charset=UTF-8")
+		w.WriteHeader(http.StatusBadRequest)
 		json.NewEncoder(w).Encode(map[string]string{"error": "Не указан идентификатор"})
 		return
 	}
 	id, err := strconv.Atoi(idParam)
 	if err != nil {
 		w.Header().Set("Content-Type", "application/json; charset=UTF-8")
+		w.WriteHeader(http.StatusBadRequest)
 		json.NewEncoder(w).Encode(map[string]string{"error": "Неверный формат идентификатора"})
 		return
 	}
@@ -95,6 +101,7 @@ func (s *Server) getTaskByIDHandler(w http.ResponseWriter, r *http.Request) {
 	err = row.Scan(&task.ID, &task.Date, &task.Title, &task.Comment, &task.Repeat)
 	if err != nil {
 		w.Header().Set("Content-Type", "application/json; charset=UTF-8")
+		w.WriteHeader(http.StatusNotFound)
 		json.NewEncoder(w).Encode(map[string]string{"error": "Задача не найдена"})
 		return
 	}
@@ -117,11 +124,13 @@ func (s *Server) createTaskHandler(w http.ResponseWriter, r *http.Request) {
 
 	var task Task
 	if err := json.NewDecoder(r.Body).Decode(&task); err != nil {
+		w.WriteHeader(http.StatusBadRequest)
 		json.NewEncoder(w).Encode(map[string]string{"error": "ошибка десериализации JSON"})
 		return
 	}
 
 	if strings.TrimSpace(task.Title) == "" {
+		w.WriteHeader(http.StatusBadRequest)
 		json.NewEncoder(w).Encode(map[string]string{"error": "Не указан заголовок задачи"})
 		return
 	}
@@ -132,17 +141,20 @@ func (s *Server) createTaskHandler(w http.ResponseWriter, r *http.Request) {
 
 	if strings.TrimSpace(task.Repeat) != "" {
 		if task.Repeat != "y" && !strings.HasPrefix(task.Repeat, "d ") {
+			w.WriteHeader(http.StatusBadRequest)
 			json.NewEncoder(w).Encode(map[string]string{"error": "неподдерживаемый формат repeat"})
 			return
 		}
 		if strings.HasPrefix(task.Repeat, "d ") {
 			parts := strings.SplitN(task.Repeat, " ", 2)
 			if len(parts) != 2 {
+				w.WriteHeader(http.StatusBadRequest)
 				json.NewEncoder(w).Encode(map[string]string{"error": "некорректный формат: не указан интервал дней"})
 				return
 			}
 			interval, err := strconv.Atoi(parts[1])
 			if err != nil || interval <= 0 || interval > 400 {
+				w.WriteHeader(http.StatusBadRequest)
 				json.NewEncoder(w).Encode(map[string]string{"error": "некорректный интервал дней"})
 				return
 			}
@@ -154,6 +166,7 @@ func (s *Server) createTaskHandler(w http.ResponseWriter, r *http.Request) {
 	} else {
 		parsedDate, err := time.Parse("20060102", task.Date)
 		if err != nil {
+			w.WriteHeader(http.StatusBadRequest)
 			json.NewEncoder(w).Encode(map[string]string{"error": "Дата представлена в неверном формате"})
 			return
 		}
@@ -161,6 +174,7 @@ func (s *Server) createTaskHandler(w http.ResponseWriter, r *http.Request) {
 			if strings.TrimSpace(task.Repeat) != "" {
 				nextDate, err := utils.NextDate(today, task.Date, task.Repeat)
 				if err != nil {
+					w.WriteHeader(http.StatusInternalServerError)
 					json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
 					return
 				}
@@ -175,11 +189,13 @@ func (s *Server) createTaskHandler(w http.ResponseWriter, r *http.Request) {
 		`INSERT INTO scheduler (date, title, comment, repeat) VALUES (?, ?, ?, ?)`,
 		task.Date, task.Title, task.Comment, task.Repeat)
 	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
 		json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
 		return
 	}
 	id, err := res.LastInsertId()
 	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
 		json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
 		return
 	}
@@ -195,6 +211,7 @@ func (s *Server) updateTaskHandler(w http.ResponseWriter, r *http.Request) {
 
 	var task Task
 	if err := json.NewDecoder(r.Body).Decode(&task); err != nil {
+		w.WriteHeader(http.StatusBadRequest)
 		json.NewEncoder(w).Encode(map[string]string{"error": "ошибка десериализации JSON"})
 		return
 	}
@@ -209,11 +226,13 @@ func (s *Server) updateTaskHandler(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if task.ID == 0 {
+		w.WriteHeader(http.StatusBadRequest)
 		json.NewEncoder(w).Encode(map[string]string{"error": "Не указан идентификатор"})
 		return
 	}
 
 	if strings.TrimSpace(task.Title) == "" {
+		w.WriteHeader(http.StatusBadRequest)
 		json.NewEncoder(w).Encode(map[string]string{"error": "Не указан заголовок задачи"})
 		return
 	}
@@ -224,17 +243,20 @@ func (s *Server) updateTaskHandler(w http.ResponseWriter, r *http.Request) {
 
 	if strings.TrimSpace(task.Repeat) != "" {
 		if task.Repeat != "y" && !strings.HasPrefix(task.Repeat, "d ") {
+			w.WriteHeader(http.StatusBadRequest)
 			json.NewEncoder(w).Encode(map[string]string{"error": "неподдерживаемый формат repeat"})
 			return
 		}
 		if strings.HasPrefix(task.Repeat, "d ") {
 			parts := strings.SplitN(task.Repeat, " ", 2)
 			if len(parts) != 2 {
+				w.WriteHeader(http.StatusBadRequest)
 				json.NewEncoder(w).Encode(map[string]string{"error": "некорректный формат: не указан интервал дней"})
 				return
 			}
 			interval, err := strconv.Atoi(parts[1])
 			if err != nil || interval <= 0 || interval > 400 {
+				w.WriteHeader(http.StatusBadRequest)
 				json.NewEncoder(w).Encode(map[string]string{"error": "некорректный интервал дней"})
 				return
 			}
@@ -246,6 +268,7 @@ func (s *Server) updateTaskHandler(w http.ResponseWriter, r *http.Request) {
 	} else {
 		parsedDate, err := time.Parse("20060102", task.Date)
 		if err != nil {
+			w.WriteHeader(http.StatusBadRequest)
 			json.NewEncoder(w).Encode(map[string]string{"error": "Дата представлена в неверном формате"})
 			return
 		}
@@ -253,6 +276,7 @@ func (s *Server) updateTaskHandler(w http.ResponseWriter, r *http.Request) {
 			if strings.TrimSpace(task.Repeat) != "" {
 				nextDate, err := utils.NextDate(today, task.Date, task.Repeat)
 				if err != nil {
+					w.WriteHeader(http.StatusInternalServerError)
 					json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
 					return
 				}
@@ -267,15 +291,18 @@ func (s *Server) updateTaskHandler(w http.ResponseWriter, r *http.Request) {
 		`UPDATE scheduler SET date = ?, title = ?, comment = ?, repeat = ? WHERE id = ?`,
 		task.Date, task.Title, task.Comment, task.Repeat, task.ID)
 	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
 		json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
 		return
 	}
 	rowsAffected, err := res.RowsAffected()
 	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
 		json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
 		return
 	}
 	if rowsAffected == 0 {
+		w.WriteHeader(http.StatusNotFound)
 		json.NewEncoder(w).Encode(map[string]string{"error": "Задача не найдена"})
 		return
 	}
@@ -285,14 +312,17 @@ func (s *Server) updateTaskHandler(w http.ResponseWriter, r *http.Request) {
 
 // GET /api/tasks – возвращает список задач
 func (s *Server) getTasksHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json; charset=UTF-8")
 	if r.Method != http.MethodGet {
+		w.WriteHeader(http.StatusMethodNotAllowed)
 		http.Error(w, "invalid request method", http.StatusMethodNotAllowed)
 		return
 	}
 
 	rows, err := s.db.Query(`SELECT id, date, title, comment, repeat FROM scheduler ORDER BY date`)
 	if err != nil {
-		w.Header().Set("Content-Type", "application/json; charset=UTF-8")
+
+		w.WriteHeader(http.StatusInternalServerError)
 		json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
 		return
 	}
@@ -303,7 +333,7 @@ func (s *Server) getTasksHandler(w http.ResponseWriter, r *http.Request) {
 		var id int
 		var date, title, comment, repeat string
 		if err := rows.Scan(&id, &date, &title, &comment, &repeat); err != nil {
-			w.Header().Set("Content-Type", "application/json; charset=UTF-8")
+			w.WriteHeader(http.StatusInternalServerError)
 			json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
 			return
 		}
@@ -320,7 +350,7 @@ func (s *Server) getTasksHandler(w http.ResponseWriter, r *http.Request) {
 	response := map[string]interface{}{
 		"tasks": tasks,
 	}
-	w.Header().Set("Content-Type", "application/json; charset=UTF-8")
+
 	if err := json.NewEncoder(w).Encode(response); err != nil {
 		http.Error(w, `{"error": "ошибка кодирования JSON"}`, http.StatusInternalServerError)
 	}
@@ -331,11 +361,13 @@ func (s *Server) handleTaskDone(w http.ResponseWriter, r *http.Request) {
 
 	idParam := r.URL.Query().Get("id")
 	if idParam == "" {
+		w.WriteHeader(http.StatusBadRequest)
 		json.NewEncoder(w).Encode(map[string]string{"error": "Не указан идентификатор"})
 		return
 	}
 	id, err := strconv.Atoi(idParam)
 	if err != nil {
+		w.WriteHeader(http.StatusBadRequest)
 		json.NewEncoder(w).Encode(map[string]string{"error": "Неверный формат идентификатора"})
 		return
 	}
@@ -346,6 +378,7 @@ func (s *Server) handleTaskDone(w http.ResponseWriter, r *http.Request) {
 		err := s.db.QueryRow(`SELECT id, date, title, comment, repeat FROM scheduler WHERE id = ?`, id).
 			Scan(&task.ID, &task.Date, &task.Title, &task.Comment, &task.Repeat)
 		if err != nil {
+			w.WriteHeader(http.StatusNotFound)
 			json.NewEncoder(w).Encode(map[string]string{"error": "Задача не найдена"})
 			return
 		}
@@ -354,11 +387,13 @@ func (s *Server) handleTaskDone(w http.ResponseWriter, r *http.Request) {
 			// Одноразовая задача – удаляем запись
 			res, err := s.db.Exec(`DELETE FROM scheduler WHERE id = ?`, id)
 			if err != nil {
+				w.WriteHeader(http.StatusInternalServerError)
 				json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
 				return
 			}
 			rowsAffected, err := res.RowsAffected()
 			if err != nil || rowsAffected == 0 {
+				w.WriteHeader(http.StatusNotFound)
 				json.NewEncoder(w).Encode(map[string]string{"error": "Задача не найдена"})
 				return
 			}
@@ -370,16 +405,19 @@ func (s *Server) handleTaskDone(w http.ResponseWriter, r *http.Request) {
 			today := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
 			nextDate, err := utils.NextDate(today, task.Date, task.Repeat)
 			if err != nil {
+				w.WriteHeader(http.StatusInternalServerError)
 				json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
 				return
 			}
 			res, err := s.db.Exec(`UPDATE scheduler SET date = ? WHERE id = ?`, nextDate, id)
 			if err != nil {
+				w.WriteHeader(http.StatusInternalServerError)
 				json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
 				return
 			}
 			rowsAffected, err := res.RowsAffected()
 			if err != nil || rowsAffected == 0 {
+				w.WriteHeader(http.StatusNotFound)
 				json.NewEncoder(w).Encode(map[string]string{"error": "Задача не найдена"})
 				return
 			}
@@ -390,11 +428,13 @@ func (s *Server) handleTaskDone(w http.ResponseWriter, r *http.Request) {
 		// DELETE-запрос – удаляем задачу
 		res, err := s.db.Exec(`DELETE FROM scheduler WHERE id = ?`, id)
 		if err != nil {
+			w.WriteHeader(http.StatusInternalServerError)
 			json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
 			return
 		}
 		rowsAffected, err := res.RowsAffected()
 		if err != nil || rowsAffected == 0 {
+			w.WriteHeader(http.StatusNotFound)
 			json.NewEncoder(w).Encode(map[string]string{"error": "Задача не найдена"})
 			return
 		}
